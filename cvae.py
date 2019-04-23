@@ -4,10 +4,15 @@ import numpy as np
 from tqdm.autonotebook import tqdm
 import pickle
 
+from typing import Union
+
+from data_prep import get_load_and_preprocess_func, get_preprocess_func, get_load_func
+
 '''
 tf implementation of a Convolutional Variational Autoencoder. 
 Source: https://www.tensorflow.org/alpha/tutorials/generative/cvae
 '''
+
 EXAMPLE_ARCH_DEF = {
     'input': (28, 28, 1),
     'latent': 12,
@@ -32,7 +37,8 @@ class CVAE(tf.keras.Model):
 
     def sample(self, eps=None, n=10):
         if eps is None:
-            eps = tf.random.normal(shape=(n, self.latent_dim))
+            #eps = tf.random.normal(shape=(n, self.latent_dim))  # tf 1.13
+            eps = tf.random_normal(shape=(n, self.latent_dim))  # tf 1.10
         return self.decode(eps, apply_sigmoid=True)
 
     def encode(self, x):
@@ -40,7 +46,8 @@ class CVAE(tf.keras.Model):
         return mean, logvar
 
     def reparameterize(self, mean, logvar):
-        eps = tf.random.normal(shape=mean.shape)
+        #eps = tf.random.normal(shape=mean.shape)  # tf 1.13
+        eps = tf.random_normal(shape=mean.shape)  # tf 1.10
         return eps * tf.exp(logvar * .5) + mean
 
     def decode(self, z, apply_sigmoid=False):
@@ -137,3 +144,70 @@ class CVAE(tf.keras.Model):
         cvae = CVAE(arch_def)
         cvae.load_weights(weights_path)
         return cvae
+
+
+class CVAEToolBox:
+    def __init__(self, model: CVAE):
+        self.model = model
+        self.load_and_preprocess = get_load_and_preprocess_func(model.arch_def['input'])
+        self.load_from_file = get_load_func()
+        self.preprocess = get_preprocess_func(model.arch_def['input'])
+
+    def to_tensor(self, input_: Union[np.ndarray, str], with_batch_dim=True, preprocess=True):
+        if type(input_) == str:
+            tensor = self.load_from_file(input_)
+        else:
+            tensor = tf.convert_to_tensor(input_, dtype=tf.float32)
+
+        if preprocess:
+            tensor = self.preprocess(tensor)
+
+        if with_batch_dim:
+            tensor = tf.expand_dims(tensor, 0)
+        return tensor
+
+    def load_and_reconstruct_image(self, path):
+        image = self.load_and_preprocess(path)
+        x = tf.expand_dims(image, 0)
+        mean, logvar = self.model.encode(x)
+        z = self.model.reparameterize(mean, logvar)
+        output = self.model.decode(z)
+
+        output = output[0].numpy()
+        output = output / output.max()
+        output = (output * 255).astype(np.uint8)
+
+        return image, output
+
+    def to_latent(self, x):
+        mean, logvar = self.model.encode(x)
+        z = self.model.reparameterize(mean, logvar)
+        return z
+
+    def from_latent(self, z):
+        output = self.model.decode(z)
+        output = output[0].numpy()
+        output = output / output.max()
+        output = (output * 255).astype(np.uint8)
+        return output
+
+    def interpolate_between_images(self, a, b, steps=10):
+        assert steps > 1
+        latent_a = self.to_latent(a)
+        latent_b = self.to_latent(b)
+
+        difference = latent_b - latent_a #- latent_b
+        delta = difference / steps
+
+        latent_steps = [latent_a] + [latent_a + i*delta for i in range(1, steps-1)] + [latent_b]
+        images = [self.from_latent(latent) for latent in latent_steps]
+        return images
+
+    def get_gen_with_diff_function(self, original, translation):
+        diff = self.to_latent(translation) - self.to_latent(original)
+
+        def add_diff_to_image(image):
+            latent = self.to_latent(image) + diff
+            return self.from_latent(latent)
+
+        return add_diff_to_image
