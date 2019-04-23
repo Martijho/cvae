@@ -1,2 +1,2 @@
 # cvae
-Conv Variational Autoencoder implementation 
+Convolutional Variational Autoencoder
