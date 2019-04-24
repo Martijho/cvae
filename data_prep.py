@@ -1,7 +1,7 @@
 from pathlib import Path
 import cv2
 import numpy as np
-from matplotlib import pyplot as plt
+
 from tqdm import tqdm
 import tensorflow as tf
 from random import shuffle
@@ -25,30 +25,37 @@ def get_dataset(image_root, batch_size, shape=(128, 128, 3)):
 
 
 def get_load_func():
+
     def load(path):
         image = tf.read_file(path)
         image = tf.image.decode_jpeg(image, channels=3)
         return image
+
     return load
 
 
-def get_preprocess_func(shape):
+def get_preprocess_func(shape, flip=True):
+
     def preprocess(image):
+        if flip:
+            image = tf.image.flip_left_right(image)
         image = tf.image.resize_images(image, shape[:2], preserve_aspect_ratio=True)
         image = tf.image.resize_image_with_crop_or_pad(image, shape[0], shape[1])
         image /= 255.0  # normalize to [0,1] range
         return image
+
     return preprocess
 
 
-def get_load_and_preprocess_func(shape):
+def get_load_and_preprocess_func(shape, flip=True):
     load_func = get_load_func()
-    preprocess_func = get_preprocess_func(shape)
+    preprocess_func = get_preprocess_func(shape, flip=flip)
 
     def load_and_preprocess(path):
         image = load_func(path)
         image = preprocess_func(image)
         return image
+
     return load_and_preprocess
 
 

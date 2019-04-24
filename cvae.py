@@ -33,7 +33,7 @@ class CVAE(tf.keras.Model):
         encode_layers, decode_layers = CVAE.arch_def_parser(arch_def)
         self.inference_net = tf.keras.Sequential(encode_layers)
         self.generative_net = tf.keras.Sequential(decode_layers)
-        self.optimizer = tf.train.AdamOptimizer(1e-4)
+        self.optimizer = tf.train.AdagradOptimizer(0.001)
 
     def sample(self, eps=None, n=10):
         if eps is None:
@@ -128,13 +128,13 @@ class CVAE(tf.keras.Model):
             pbar.set_description("Loss {0:.2f}".format(l).ljust(15))
 
             if step % cache_every_n == 0:
-                model.save_weights(f'caches/{model.model_name}_{step}.cache')
+                model.save_weights(f'caches/{model.model_name}/{model.model_name}_{step}.cache')
 
         return loss
 
     def save_model(self):
-        self.save_weights(f'models/{self.model_name}.weights')
-        with open(f'models/{self.model_name}.def', 'wb') as writer:
+        self.save_weights(f'models/{self.model_name}/{self.model_name}.weights')
+        with open(f'models/{self.model_name}/{self.model_name}.def', 'wb') as writer:
             pickle.dump(self.arch_def, writer, protocol=pickle.HIGHEST_PROTOCOL)
 
     @classmethod
@@ -149,9 +149,9 @@ class CVAE(tf.keras.Model):
 class CVAEToolBox:
     def __init__(self, model: CVAE):
         self.model = model
-        self.load_and_preprocess = get_load_and_preprocess_func(model.arch_def['input'])
+        self.load_and_preprocess = get_load_and_preprocess_func(model.arch_def['input'], flip=False)
         self.load_from_file = get_load_func()
-        self.preprocess = get_preprocess_func(model.arch_def['input'])
+        self.preprocess = get_preprocess_func(model.arch_def['input'], flip=False)
 
     def to_tensor(self, input_: Union[np.ndarray, str], with_batch_dim=True, preprocess=True):
         if type(input_) == str:
@@ -169,14 +169,7 @@ class CVAEToolBox:
     def load_and_reconstruct_image(self, path):
         image = self.load_and_preprocess(path)
         x = tf.expand_dims(image, 0)
-        mean, logvar = self.model.encode(x)
-        z = self.model.reparameterize(mean, logvar)
-        output = self.model.decode(z)
-
-        output = output[0].numpy()
-        output = output / output.max()
-        output = (output * 255).astype(np.uint8)
-
+        output = self.from_latent(self.to_latent(x))
         return image, output
 
     def to_latent(self, x):
