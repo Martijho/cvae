@@ -24,7 +24,7 @@ EXAMPLE_ARCH_DEF = {
 
 
 class CVAE(tf.keras.Model):
-    def __init__(self, arch_def):
+    def __init__(self, arch_def, loss='cross_entropy'):
         super(CVAE, self).__init__()
         self.latent_dim = arch_def['latent']
         self.model_name = arch_def['name']
@@ -33,7 +33,14 @@ class CVAE(tf.keras.Model):
         encode_layers, decode_layers = CVAE.arch_def_parser(arch_def)
         self.inference_net = tf.keras.Sequential(encode_layers)
         self.generative_net = tf.keras.Sequential(decode_layers)
-        self.optimizer = tf.train.AdagradOptimizer(0.001)
+        self.optimizer = tf.train.AdamOptimizer(0.001)
+
+        if loss == 'cross_entropy':
+            self.loss_func = self.compute_loss
+        elif loss == 'kl_mse':
+            self.loss_func = self.compute_KL_MSE_loss
+        else:
+            raise NotImplementedError('loss function not recognized')
 
     def sample(self, eps=None, n=10):
         if eps is None:
@@ -50,7 +57,7 @@ class CVAE(tf.keras.Model):
         eps = tf.random_normal(shape=mean.shape)  # tf 1.10
         return eps * tf.exp(logvar * .5) + mean
 
-    def decode(self, z, apply_sigmoid=False):
+    def decode(self, z, apply_sigmoid=True):
         logits = self.generative_net(z)
         if apply_sigmoid:
             probs = tf.sigmoid(logits)
@@ -108,9 +115,35 @@ class CVAE(tf.keras.Model):
         logqz_x = CVAE.log_normal_pdf(z, mean, logvar)
         return -tf.reduce_mean(logpx_z + logpz - logqz_x)
 
+    def compute_KL_MSE_loss(model, x):
+        ''' From hackathon repo
+        reconstruction_loss = mse(K.flatten(inputs), K.flatten(outputs))
+        reconstruction_loss *= input_shape[0] * input_shape[0]
+        kl_loss = 1. + z_log_var - K.square(z_mean) - K.exp(z_log_var)
+        kl_loss = K.sum(kl_loss, axis=-1)
+        kl_loss *= -0.5
+        vae_loss = K.mean(reconstruction_loss + kl_loss)
+        vae.add_loss(vae_loss)
+        '''
+
+        mean, logvar = model.encode(x)
+        z = model.reparameterize(mean, logvar)
+        x_logit = model.decode(z)
+
+        reconstruction_loss = tf.reshape(x, [-1])-tf.reshape(x_logit, [-1])
+        reconstruction_loss = reconstruction_loss * reconstruction_loss
+        reconstruction_loss = tf.reduce_sum(reconstruction_loss)/tf.cast(tf.reduce_prod(x.shape), tf.float32)
+        reconstruction_loss = reconstruction_loss * model.arch_def['input'][0] * model.arch_def['input'][1]
+
+        kl_loss = 1. + logvar - mean*mean - tf.exp(logvar)
+        kl_loss = tf.reduce_sum(kl_loss, axis=-1)
+        kl_loss = -0.5*kl_loss
+        loss = tf.reduce_mean(reconstruction_loss + kl_loss)
+        return loss
+
     def compute_gradients(model, x):
         with tf.GradientTape() as tape:
-            loss = model.compute_loss(x)
+            loss = model.loss_func(x)  # model.compute_loss(x)
         return tape.gradient(loss, model.trainable_variables), loss
 
     def apply_gradients(self, gradients, variables):
@@ -127,7 +160,7 @@ class CVAE(tf.keras.Model):
             loss.append(l)
             pbar.set_description("Loss {0:.2f}".format(l).ljust(15))
 
-            if step % cache_every_n == 0:
+            if cache_every_n > 0 and step % cache_every_n == 0:
                 model.save_weights(f'caches/{model.model_name}/{model.model_name}_{step}.cache')
 
         return loss
@@ -180,7 +213,7 @@ class CVAEToolBox:
     def from_latent(self, z):
         output = self.model.decode(z)
         output = output[0].numpy()
-        output = output / output.max()
+        #output = output / output.max()
         output = (output * 255).astype(np.uint8)
         return output
 

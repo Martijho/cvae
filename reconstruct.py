@@ -12,7 +12,7 @@ config = tf.ConfigProto()
 config.gpu_options.allow_growth = True
 session = tf.Session(config=config)
 
-weights_path = 'caches/face_cvae_1_30000.cache'
+weights_path = 'models/face_cvae_1.weights'
 arch_def_path = None
 
 if arch_def_path is None:
@@ -51,7 +51,6 @@ images = toolbox.interpolate_between_images(a, b, steps=12)
 a_img, a_latent = toolbox.load_and_reconstruct_image(image_paths[0])
 b_img, b_latent = toolbox.load_and_reconstruct_image(image_paths[1])
 
-print(len(images))
 images = [a_img, a_latent] + images + [b_latent, b_img]
 
 for i, image in enumerate(images):

@@ -25,13 +25,13 @@ arch_def = {
 * ```'name'```: model name. used when storing weights and arch_def
 
 #### Provided functionality: 
-* CVAE: autoencoder-object with methods for 
+* CVAE (cvae.py): autoencoder-object with methods for 
     * sampling latent space
     * encoding image as latent vector
     * decodes latent vector to image
     * training 
     * save/load functions.
-* CVAEToolBox: util-object with some usefull functionality like 
+* CVAEToolBox (cvae.py): util-object with some usefull functionality like 
     * to/from_latent space
     * to-tensor(path/np.ndarray)
     * interpolating between images

@@ -1,47 +1,53 @@
+from cvae import CVAE
+from data_prep import get_dataset
+from training_util import init_model_dirs, run_train_loop
+
 import tensorflow as tf
 tf.enable_eager_execution()
-
-from cvae import CVAE, CVAEToolBox
-from data_prep import get_dataset
-
-from matplotlib import pyplot as plt
-from tqdm import tqdm
-from pathlib import Path
-import cv2
-from time import time
 
 config = tf.ConfigProto()
 config.gpu_options.allow_growth = True
 session = tf.Session(config=config)
 
 arch_def = {
-    'input': (128, 128, 3),
-    'latent': 128,
-    'encode': [(32, 3, (2, 2)),    # out: 64, 64 32
-               (64, 3, (2, 2)),    # out: 32, 32, 64
-               (128, 3, (2, 2)),   # out: 16, 16, 128
-               (256, 3, (2, 2)),   # out: 8, 8, 256
-               ],
+    'input': (512, 512, 3),
+    'latent': 512,
+    'encode': [(8, 3, (2, 2)),      # out: 256, 256, 8
+               (16, 3, (2, 2)),     # out: 128, 128, 16
+               (32, 3, (2, 2)),     # out: 64, 64, 32
+               (64, 3, (2, 2)),     # out: 32, 32, 64
+               (128, 3, (2, 2)),    # out: 16, 16, 128
+               (256, 3, (2, 2)),    # out: 8, 8, 256
+               (512, 3, (2, 2)),    # out: 4, 4, 512
+               (1024, 3, (2, 2))],  # out: 2, 2, 1024
     'decode': None,  # Mirror enconding for reconstruction
-    'name': 'face_cvae_3'
+    'name': 'oi_cvae_1'
 }
-Path('models/{}'.format(arch_def['name'])).mkdir(parents=True, exist_ok=True)
-Path('caches/{}'.format(arch_def['name'])).mkdir(parents=True, exist_ok=True)
-Path('output/{}'.format(arch_def['name'])).mkdir(parents=True, exist_ok=True)
+init_model_dirs(arch_def['name'])
 
 model = CVAE(arch_def)
-image_root = '/home/martin/dataset/cropped_faces'
-test_root = '/home/martin/dataset/face_test'
+image_root = '/home/martin/Desktop/data/darknet_data/openimgs_extra_v2'
+test_root = '/home/martin/Desktop/data/validation_set'
 batch_size = 16
 epochs = 180
-loss = []
-tb = CVAEToolBox(model)
+steps_pr_epoch = 16000 // batch_size
 
-ds = get_dataset(image_root, batch_size, arch_def['input'])
-test_imgs = [str(p) for p in Path(test_root).glob('*.jpg')]
+train_data = get_dataset(image_root, batch_size, arch_def['input'])
+eval_data = get_dataset(test_root, 1, arch_def['input'])
+run_train_loop(model,
+               train_data,
+               epochs,
+               steps_pr_epoch,
+               cache_every_n=steps_pr_epoch+5,
+               test_images=eval_data,
+               eval_every_epoch=True,
+               eval_steps=100,
+               save_test_images=2,
+               save_interpolation_image=True)
 
+'''
 for epoch in tqdm(range(epochs), desc='Epoch: ', leave=False):
-    l = model.train_for_n_iterations(ds, 16000 // batch_size, cache_every_n=5000)
+    l = model.train_for_n_iterations(ds, 16000 // batch_size, cache_every_n=10000)
     model.save_model()
     loss += l
 
@@ -63,4 +69,5 @@ for epoch in tqdm(range(epochs), desc='Epoch: ', leave=False):
 
 plt.plot(loss)
 plt.show()
+'''
 
