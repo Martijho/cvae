@@ -12,6 +12,21 @@ median w 142.0
 
 tf.set_random_seed(1)   # Supposedly fixes memory leak in tf 1.13
 
+class DataGenerator:
+    def __init__(self, ds):
+        self.ds = ds
+        self.iterator = ds.__iter__()
+
+    def __iter__(self):
+        return self
+
+    def __next__(self):
+        try:
+            return next(self.iterator)
+        except tf.error.OutOfRangeError:
+            self.iterator = self.ds.__iter__()
+        return next(self.iterator)
+
 
 def get_dataset(image_root, batch_size, shape=(128, 128, 3)):
     all_image_paths = [str(p) for p in Path(image_root).glob('*.jpg')]
@@ -21,7 +36,7 @@ def get_dataset(image_root, batch_size, shape=(128, 128, 3)):
     #ds = ds.shuffle(buffer_size=min(len(all_image_paths), 10000))
     ds = ds.repeat()
     ds = ds.batch(batch_size)
-    return ds
+    return DataGenerator(ds)
 
 
 def get_load_func():

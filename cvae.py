@@ -24,7 +24,7 @@ EXAMPLE_ARCH_DEF = {
 
 
 class CVAE(tf.keras.Model):
-    def __init__(self, arch_def, loss='cross_entropy'):
+    def __init__(self, arch_def, loss='kl_mse', learning_rate=0.001):
         super(CVAE, self).__init__()
         self.latent_dim = arch_def['latent']
         self.model_name = arch_def['name']
@@ -33,7 +33,7 @@ class CVAE(tf.keras.Model):
         encode_layers, decode_layers = CVAE.arch_def_parser(arch_def)
         self.inference_net = tf.keras.Sequential(encode_layers)
         self.generative_net = tf.keras.Sequential(decode_layers)
-        self.optimizer = tf.train.AdamOptimizer(0.001)
+        self.optimizer = tf.train.AdamOptimizer(learning_rate)
 
         if loss == 'cross_entropy':
             self.loss_func = self.compute_loss
@@ -74,7 +74,8 @@ class CVAE(tf.keras.Model):
         '''
         # TODO: reshape input to arch_def['input']
         encode = [InputLayer(input_shape=arch_def['input'])]
-        encode += [Conv2D(filters=f, kernel_size=k, strides=s, activation='relu') for f, k, s in arch_def['encode']]
+        encode += [Conv2D(filters=f, kernel_size=k, strides=s, activation='relu', padding='same',)
+                   for f, k, s in arch_def['encode']]
         encode.append(Flatten())
         encode.append(Dense(2*arch_def['latent']))
 
@@ -90,8 +91,8 @@ class CVAE(tf.keras.Model):
             Dense(units=np.prod(first_spatial_dim), activation=tf.nn.relu),
             Reshape(target_shape=first_spatial_dim),
         ]
-        decode += [Conv2DTranspose(filters=f, kernel_size=k, strides=s,
-                                   padding='SAME', activation='relu') for f, k, s in decode_def]
+        decode += [Conv2DTranspose(filters=f, kernel_size=k, strides=s, padding='SAME', activation='relu')
+                   for f, k, s in decode_def]
         decode.append(Conv2DTranspose(filters=arch_def['input'][-1], kernel_size=3,
                                       strides=(1, 1), padding='SAME'))
 
@@ -149,14 +150,17 @@ class CVAE(tf.keras.Model):
     def apply_gradients(self, gradients, variables):
         self.optimizer.apply_gradients(zip(gradients, variables))
 
+    def train_on_batch(model, batch):
+        gradients, loss = model.compute_gradients(batch)
+        model.apply_gradients(gradients, model.trainable_variables)
+        return loss
+
     def train_for_n_iterations(model, dataset, steps, cache_every_n=10000):
         loss = []
-        data_iterator = dataset.__iter__()
         pbar = tqdm(range(steps))
         for step in pbar:
-            X = next(data_iterator)
-            gradients, l = model.compute_gradients(X)
-            model.apply_gradients(gradients, model.trainable_variables)
+            X = next(dataset)
+            l = model.train_on_batch(X)
             loss.append(l)
             pbar.set_description("Loss {0:.2f}".format(l).ljust(15))
 
