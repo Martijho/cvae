@@ -13,6 +13,7 @@ def init_model_dirs(model_name):
 
 
 def run_train_loop(model, dataset, epochs, steps_pr_epoch,
+                   increase_beta_every_n_epochs=None,
                    cache_every_n=10000, testset=None,
                    eval_every_epoch=True, eval_steps=None,
                    save_test_images=2, save_interpolation_image=True):
@@ -47,6 +48,8 @@ def run_train_loop(model, dataset, epochs, steps_pr_epoch,
         static_test_images = [next(testset) for _ in range(save_test_images)] if eval_every_epoch else []
 
     for epoch in tqdm(range(epochs), desc='Epoch: ', leave=False):
+        if increase_beta_every_n_epochs and epoch % increase_beta_every_n_epochs == 0 and epoch != 0:
+            model.increase_beta()
         l = model.train_for_n_iterations(dataset, steps_pr_epoch, cache_every_n=cache_every_n)
         model.save_model()
         train_loss += l

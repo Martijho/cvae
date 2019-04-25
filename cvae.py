@@ -24,7 +24,7 @@ EXAMPLE_ARCH_DEF = {
 
 
 class CVAE(tf.keras.Model):
-    def __init__(self, arch_def, loss='kl_mse', learning_rate=0.001):
+    def __init__(self, arch_def, loss='kl_mse', learning_rate=0.001, initial_beta=0.0):
         super(CVAE, self).__init__()
         self.latent_dim = arch_def['latent']
         self.model_name = arch_def['name']
@@ -41,6 +41,13 @@ class CVAE(tf.keras.Model):
             self.loss_func = self.compute_KL_MSE_loss
         else:
             raise NotImplementedError('loss function not recognized')
+
+        self.beta = initial_beta
+
+    def increase_beta(self, increment=0.005):
+        self.beta += increment
+        if self.beta > 1:
+            self.beta = 1
 
     def sample(self, eps=None, n=10):
         if eps is None:
@@ -139,7 +146,7 @@ class CVAE(tf.keras.Model):
         kl_loss = 1. + logvar - mean*mean - tf.exp(logvar)
         kl_loss = tf.reduce_sum(kl_loss, axis=-1)
         kl_loss = -0.5*kl_loss
-        loss = tf.reduce_mean(reconstruction_loss + kl_loss)
+        loss = tf.reduce_mean((1-model.beta)*reconstruction_loss + model.beta*kl_loss)
         return loss
 
     def compute_gradients(model, x):
