@@ -13,7 +13,7 @@ def init_model_dirs(model_name):
 
 
 def run_train_loop(model, dataset, epochs, steps_pr_epoch,
-                   increase_beta_every_n_epochs=None,
+                   beta_factor=None,
                    cache_every_n=10000, testset=None,
                    eval_every_epoch=True, eval_steps=None,
                    save_test_images=2, save_interpolation_image=True):
@@ -23,6 +23,7 @@ def run_train_loop(model, dataset, epochs, steps_pr_epoch,
     :param dataset: Data to train model on
     :param epochs: Number of epochs to train
     :param steps_pr_epoch: Number of steps pr epoch
+    :param beta_factor: if not None, sets beta as trained_steps / beta_factor
     :param cache_every_n: Caches training state every n training steps (within each epoch. if cache_every_n is
     smaller than steps_pr_epoch, the only states that are saved are those inbetween each epoch)
     :param testset: Images to test on
@@ -47,10 +48,12 @@ def run_train_loop(model, dataset, epochs, steps_pr_epoch,
     if testset is not None:
         static_test_images = [next(testset) for _ in range(save_test_images)] if eval_every_epoch else []
 
-    for epoch in tqdm(range(epochs), desc='Epoch: ', leave=False):
-        if increase_beta_every_n_epochs and epoch % increase_beta_every_n_epochs == 0 and epoch != 0:
-            model.increase_beta()
-        l = model.train_for_n_iterations(dataset, steps_pr_epoch, cache_every_n=cache_every_n)
+    epoch_start = model.trained_steps // steps_pr_epoch
+
+    for epoch in tqdm(range(epoch_start, epochs), desc='Epoch: ', leave=False):
+        l = model.train_for_n_iterations(dataset, steps_pr_epoch,
+                                         cache_every_n=cache_every_n,
+                                         beta_factor=beta_factor)
         model.save_model()
         train_loss += l
 

@@ -1,29 +1,39 @@
-import tensorflow as tf
-from tensorflow.keras.layers import InputLayer, Conv2D, Flatten, Dense, Reshape, Conv2DTranspose
+from keras.models import Model
+from keras.layers import Input, Conv2D, Dense, Flatten, UpSampling2D, Reshape, Layer
+from keras import backend as K
 import numpy as np
-from tqdm.autonotebook import tqdm
-import pickle
-
-from typing import Union
-
-from data_prep import get_load_and_preprocess_func, get_preprocess_func, get_load_func
-
-'''
-tf implementation of a Convolutional Variational Autoencoder. 
-Source: https://www.tensorflow.org/alpha/tutorials/generative/cvae
-'''
-
-EXAMPLE_ARCH_DEF = {
-    'input': (28, 28, 1),
-    'latent': 12,
-    'encode': [(32, 3, (2, 2)),
-               (64, 3, (2, 2))],
-    'decode': None,
-    'name': 'MODEL_NAME'
-}
 
 
-class CVAE(tf.keras.Model):
+class Reparameterize(Layer):
+    def __init__(self, **kwargs):
+        self.mean_start = None
+        self.mean_stop = None
+        self.logvar_start = None
+        self.logvar_stop = None
+        super(Reparameterize, self).__init__(**kwargs)
+
+    def build(self, input_shape):
+        assert len(input_shape) == 2
+        assert input_shape[1] % 2 == 0, 'Reparameterize needs a even number of inputs'
+
+        self.mean_start = K.constant([0, 0], dtype='int32')
+        self.mean_stop = K.constant([-1, (input_shape[1]//2)], dtype='int32')
+        self.logvar_start = K.constant([0, input_shape[1]//2], dtype='int32')
+        self.logvar_stop = K.constant([-1, -1], dtype='int32')
+
+        super(Reparameterize, self).build(input_shape)  # Be sure to call this at the end
+
+    def call(self, x):
+        eps = K.random_normal(shape=self.mean_stop)
+        mean = K.slice(x, self.mean_start, self.mean_stop)
+        logvar = K.slice(x, self.logvar_start, self.logvar_stop)
+        return eps*K.exp(logvar * .5) + mean
+
+    def compute_output_shape(self, input_shape):
+        return (input_shape[0], input_shape[1]//2)
+
+
+class CVAE:
     def __init__(self, arch_def, loss='kl_mse', learning_rate=0.001, initial_beta=0.0):
         super(CVAE, self).__init__()
         self.latent_dim = arch_def['latent']
@@ -31,18 +41,19 @@ class CVAE(tf.keras.Model):
         self.arch_def = arch_def
 
         encode_layers, decode_layers = CVAE.arch_def_parser(arch_def)
-        self.inference_net = tf.keras.Sequential(encode_layers)
-        self.generative_net = tf.keras.Sequential(decode_layers)
-        self.optimizer = tf.train.AdamOptimizer(learning_rate)
+        encode_in, z = encode_layers[0], encode_layers[0]
+        decode_in, x_ = decode_layers[0], decode_layers[0]
+        for layer in encode_layers[1:]:
+            z = layer(z)
+        for layer in decode_layers[1:]:
+            x_ = layer(x_)
 
-        if loss == 'cross_entropy':
-            self.loss_func = self.compute_loss
-        elif loss == 'kl_mse':
-            self.loss_func = self.compute_KL_MSE_loss
-        else:
-            raise NotImplementedError('loss function not recognized')
-        self._loss_arg = loss
-        self.trained_steps = 0
+        self.inference_net = Model(inputs=encode_in, outputs=z)
+        self.generative_net = Model(inputs=decode_in, outputs=x_)
+
+        self.cvae = Model(inputs=self.inference_net, outputs=self.generative_net(self.inference_net))
+        self.cvae.compile(loss=self.kl_mse_loss, optimizer='adam')
+
         self.beta = initial_beta
 
     def increase_beta(self, increment=0.25):
@@ -57,11 +68,6 @@ class CVAE(tf.keras.Model):
     def encode(self, x):
         mean, logvar = tf.split(self.inference_net(x), num_or_size_splits=2, axis=1)
         return mean, logvar
-
-    def reparameterize(self, mean, logvar):
-        #eps = tf.random.normal(shape=mean.shape)  # tf 1.13
-        eps = tf.random_normal(shape=mean.shape)  # tf 1.10
-        return eps * tf.exp(logvar * .5) + mean
 
     def decode(self, z, apply_sigmoid=True):
         logits = self.generative_net(z)
@@ -79,11 +85,12 @@ class CVAE(tf.keras.Model):
         :return: (encoding layers, decoding layers)
         '''
         # TODO: reshape input to arch_def['input']
-        encode = [InputLayer(input_shape=arch_def['input'])]
-        encode += [Conv2D(filters=f, kernel_size=k, strides=s, activation='relu', padding='same',)
+        encode = [Input(input_shape=arch_def['input'])]
+        encode += [Conv2D(filters=f, kernel_size=k, strides=s, activation='relu', padding='same')
                    for f, k, s in arch_def['encode']]
         encode.append(Flatten())
         encode.append(Dense(2*arch_def['latent']))
+        encode.append(Reparameterize(name='reparameterize'))
 
         fsd_h, fsd_w = arch_def['input'][:2]
         for f, k, (s1, s2) in arch_def['encode']:
@@ -93,23 +100,32 @@ class CVAE(tf.keras.Model):
 
         decode_def = arch_def['decode'] if arch_def['decode'] else list(reversed(arch_def['encode']))
         decode = [
-            InputLayer(input_shape=(arch_def['latent'],)),
-            Dense(units=np.prod(first_spatial_dim), activation=tf.nn.relu),
+            Input(input_shape=(arch_def['latent'],)),
+            Dense(units=np.prod(first_spatial_dim), activation='relu'),
             Reshape(target_shape=first_spatial_dim),
         ]
-        decode += [Conv2DTranspose(filters=f, kernel_size=k, strides=s, padding='SAME', activation='relu')
-                   for f, k, s in decode_def]
-        decode.append(Conv2DTranspose(filters=arch_def['input'][-1], kernel_size=3,
-                                      strides=(1, 1), padding='SAME'))
+        for f, k, s in decode_def:
+            if s == (2, 2):
+                decode.append(Conv2D(filters=f, kernel_size=k, padding='SAME', activation='relu'))
+                decode.append(UpSampling2D(s))
+
+        decode.append(Conv2D(filters=arch_def['input'][-1], kernel_size=3, padding='same'))
+
 
         return encode, decode
 
     @staticmethod
-    def log_normal_pdf(sample, mean, logvar, raxis=1):
-        log2pi = tf.math.log(2. * np.pi)
-        return tf.reduce_sum(
-            -.5 * ((sample - mean) ** 2. * tf.exp(-logvar) + logvar + log2pi),
-            axis=raxis)
+    def kl_loss(x, y):
+        pass
+    @staticmethod
+    def reconstruction_loss(x, y):
+        pass
+
+    @classmethod
+    def cvae_loss(cls, x, y):
+        recon = cls.reconstruction_loss(x, y)
+        kl = cls.kl_loss(x, y)
+
 
     def compute_loss(model, x):
         mean, logvar = model.encode(x)
@@ -205,63 +221,3 @@ class CVAE(tf.keras.Model):
         cvae.trained_steps = state['trained_steps']
         cvae.load_weights(weights_path)
         return cvae
-
-
-class CVAEToolBox:
-    def __init__(self, model: CVAE):
-        self.model = model
-        self.load_and_preprocess = get_load_and_preprocess_func(model.arch_def['input'], flip=False)
-        self.load_from_file = get_load_func()
-        self.preprocess = get_preprocess_func(model.arch_def['input'], flip=False)
-
-    def to_tensor(self, input_: Union[np.ndarray, str], with_batch_dim=True, preprocess=True):
-        if type(input_) == str:
-            tensor = self.load_from_file(input_)
-        else:
-            tensor = tf.convert_to_tensor(input_, dtype=tf.float32)
-
-        if preprocess:
-            tensor = self.preprocess(tensor)
-
-        if with_batch_dim:
-            tensor = tf.expand_dims(tensor, 0)
-        return tensor
-
-    def load_and_reconstruct_image(self, path):
-        image = self.load_and_preprocess(path)
-        x = tf.expand_dims(image, 0)
-        output = self.from_latent(self.to_latent(x))
-        return image, output
-
-    def to_latent(self, x):
-        mean, logvar = self.model.encode(x)
-        z = self.model.reparameterize(mean, logvar)
-        return z
-
-    def from_latent(self, z):
-        output = self.model.decode(z)
-        output = output[0].numpy()
-        #output = output / output.max()
-        output = (output * 255).astype(np.uint8)
-        return output
-
-    def interpolate_between_images(self, a, b, steps=10):
-        assert steps > 1
-        latent_a = self.to_latent(a)
-        latent_b = self.to_latent(b)
-
-        difference = latent_b - latent_a #- latent_b
-        delta = difference / steps
-
-        latent_steps = [latent_a] + [latent_a + i*delta for i in range(1, steps-1)] + [latent_b]
-        images = [self.from_latent(latent) for latent in latent_steps]
-        return images
-
-    def get_gen_with_diff_function(self, original, translation):
-        diff = self.to_latent(translation) - self.to_latent(original)
-
-        def add_diff_to_image(image):
-            latent = self.to_latent(image) + diff
-            return self.from_latent(latent)
-
-        return add_diff_to_image
