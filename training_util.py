@@ -13,7 +13,6 @@ def init_model_dirs(model_name):
 
 
 def run_train_loop(model, dataset, epochs, steps_pr_epoch,
-                   beta_factor=None,
                    cache_every_n=10000, testset=None,
                    eval_every_epoch=True, eval_steps=None,
                    save_test_images=2, save_interpolation_image=True):
@@ -23,7 +22,6 @@ def run_train_loop(model, dataset, epochs, steps_pr_epoch,
     :param dataset: Data to train model on
     :param epochs: Number of epochs to train
     :param steps_pr_epoch: Number of steps pr epoch
-    :param beta_factor: if not None, sets beta as trained_steps / beta_factor
     :param cache_every_n: Caches training state every n training steps (within each epoch. if cache_every_n is
     smaller than steps_pr_epoch, the only states that are saved are those inbetween each epoch)
     :param testset: Images to test on
@@ -51,9 +49,14 @@ def run_train_loop(model, dataset, epochs, steps_pr_epoch,
     epoch_start = model.trained_steps // steps_pr_epoch
 
     for epoch in tqdm(range(epoch_start, epochs), desc='Epoch: ', leave=False):
-        l = model.train_for_n_iterations(dataset, steps_pr_epoch,
-                                         cache_every_n=cache_every_n,
-                                         beta_factor=beta_factor)
+        if 300 <= epoch < 400:
+            model.beta = (epoch % 100) / 100
+        model.beta = 1 if epoch == 400 else model.beta
+        model.beta = 2 if epoch == 800 else model.beta
+        model.beta = 3 if epoch == 1000 else model.beta
+        model.beta = 4 if epoch == 1200 else model.beta
+
+        l = model.train_for_n_iterations(dataset, steps_pr_epoch, cache_every_n=cache_every_n)
         model.save_model()
         train_loss += l
 

@@ -146,7 +146,7 @@ class CVAE(tf.keras.Model):
         kl_loss = tf.reduce_sum(kl_loss, axis=-1)
         kl_loss = -0.5*kl_loss
 
-        loss = tf.reduce_mean(reconstruction_loss*(1-model.beta) + kl_loss*model.beta)
+        loss = tf.reduce_mean(reconstruction_loss + kl_loss*model.beta)
         # print('KL:', kl_loss)
         # print('Rec:', reconstruction_loss)
         return loss
@@ -159,7 +159,7 @@ class CVAE(tf.keras.Model):
     def apply_gradients(self, gradients, variables):
         self.optimizer.apply_gradients(zip(gradients, variables))
 
-    def train_on_batch(model, batch, beta_factor: Union[None, int]=None):
+    def train_on_batch(model, batch):
         '''
         Runs one forwards pass of batch, computes gradients and loss and applies gradients to network
         :param batch: Model input
@@ -168,18 +168,18 @@ class CVAE(tf.keras.Model):
         NB: Beta is only used by kl_mse loss
         :return: calculated loss
         '''
-        model.beta = 1 if not beta_factor else model.trained_steps / beta_factor
+        #model.beta = 1 if not beta_factor else model.trained_steps / beta_factor
         gradients, loss = model.compute_gradients(batch)
         model.apply_gradients(gradients, model.trainable_variables)
         model.trained_steps += 1
         return loss
 
-    def train_for_n_iterations(model, dataset, steps, cache_every_n=-1, beta_factor=None):
+    def train_for_n_iterations(model, dataset, steps, cache_every_n=-1):
         loss = []
         pbar = tqdm(range(steps))
         for step in pbar:
             X = next(dataset)
-            l = model.train_on_batch(X, beta_factor=beta_factor)
+            l = model.train_on_batch(X)
             loss.append(l)
             pbar.set_description("Loss {0:.2f}".format(l).ljust(15))
 
