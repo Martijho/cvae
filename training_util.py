@@ -6,13 +6,27 @@ import numpy as np
 
 from cvae import CVAEToolBox
 
+
 def init_model_dirs(model_name):
     Path('models/{}'.format(model_name)).mkdir(parents=True, exist_ok=True)
     Path('caches/{}'.format(model_name)).mkdir(parents=True, exist_ok=True)
     Path('output/{}'.format(model_name)).mkdir(parents=True, exist_ok=True)
 
 
+def plot_loss(train_min, train_mean, train_max, val=None):
+
+    plt.fill_between(list(range(len(train_max))), train_min, train_max, color='blue', alpha=0.3)
+    plt.plot(train_min, color='blue', alpha=0.5)
+    plt.plot(train_max, color='blue', alpha=0.5)
+    plt.plot(train_mean, '--', color='blue', label='Training loss')
+    if val:
+        plt.plot(val, '--', color='green', label='Validation loss')
+        plt.legend()
+    plt.grid(True)
+
+
 def run_train_loop(model, dataset, epochs, steps_pr_epoch,
+                   increase_beta_at=None,
                    cache_every_n=10000, testset=None,
                    eval_every_epoch=True, eval_steps=None,
                    save_test_images=2, save_interpolation_image=True):
@@ -40,7 +54,9 @@ def run_train_loop(model, dataset, epochs, steps_pr_epoch,
             assert save_test_images >= 2
 
     toolbox = CVAEToolBox(model)
-    train_loss = []
+    train_loss_min = []
+    train_loss_max = []
+    train_loss_mean = []
     val_loss = []
 
     if testset is not None:
@@ -49,16 +65,18 @@ def run_train_loop(model, dataset, epochs, steps_pr_epoch,
     epoch_start = model.trained_steps // steps_pr_epoch
 
     for epoch in tqdm(range(epoch_start, epochs), desc='Epoch: ', leave=False):
-        if 300 <= epoch < 400:
-            model.beta = (epoch % 100) / 100
-        model.beta = 1 if epoch == 400 else model.beta
-        model.beta = 2 if epoch == 800 else model.beta
-        model.beta = 3 if epoch == 1000 else model.beta
-        model.beta = 4 if epoch == 1200 else model.beta
+        if increase_beta_at:
+            if increase_beta_at[0] <= epoch < increase_beta_at[0] + 100:
+                model.beta = (epoch % 100) / 100
+            model.beta = 1 if epoch == increase_beta_at[0] else model.beta
+            for inc in increase_beta_at[:1]:
+                model.beta += 1 if epoch == inc else model.beta
 
         l = model.train_for_n_iterations(dataset, steps_pr_epoch, cache_every_n=cache_every_n)
         model.save_model()
-        train_loss += l
+        train_loss_max.append(max(l))
+        train_loss_min.append(min(l))
+        train_loss_mean.append(sum(l)/len(l))
 
         if eval_every_epoch:
             vl = [model.loss_func(next(testset)) for _ in range(eval_steps)]
@@ -84,9 +102,9 @@ def run_train_loop(model, dataset, epochs, steps_pr_epoch,
                 cv2.imwrite('output/{}/interpolation_epoch_{}.jpg'.format(model.model_name, epoch),
                             cv2.cvtColor(transition, cv2.COLOR_RGB2BGR))
 
-        plt.plot(train_loss)
-        if eval_every_epoch:
-            plt.plot([(i+1)*len(l) for i in range(epoch+1)], val_loss)
-            plt.legend(['training loss', 'validation loss'])
+        if epoch == 1000:
+            model.recreate_optimizer(0.00001)
+
+        plot_loss(train_loss_min, train_loss_mean, train_loss_max, val=val_loss if eval_every_epoch else None)
         plt.savefig('output/{}/train_metrics.png'.format(model.model_name))
         plt.clf()

@@ -206,6 +206,14 @@ class CVAE(tf.keras.Model):
         cvae.load_weights(weights_path)
         return cvae
 
+    def encoding_trainable(self, trainable):
+        self.inference_net.trainable = trainable
+
+    def decoding_trainable(self, trainable):
+        self.generative_net.trainable = trainable
+
+    def recreate_optimizer(self, loss):
+        self.optimizer = tf.train.AdamOptimizer(loss)
 
 class CVAEToolBox:
     def __init__(self, model: CVAE):

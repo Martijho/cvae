@@ -21,19 +21,17 @@ arch_def = {
                (1024, 3, (2, 2))],  # out: 1, 1, 512
 
     'decode': None,  # Mirror enconding for reconstruction
-    'name': 'face_cvae_1'
+    'name': 'face_cvae_first_stage'
 }
 
 model = CVAE(arch_def, loss='kl_mse', learning_rate=0.0001)
-#model.load_weights('models/face_cvae_5/face_cvae_5.weights')
-
 init_model_dirs(model.arch_def['name'])
 
 image_root = '/home/martin/dataset/cropped_faces'
 test_root = '/home/martin/dataset/face_test'
-batch_size = 16
-epochs = 1800
-steps_pr_epoch = 1600 // batch_size
+batch_size = 4
+epochs = 1500
+steps_pr_epoch = 100
 
 train_data = get_dataset(image_root, batch_size, model.arch_def['input'])
 eval_data = get_dataset(test_root, 1, model.arch_def['input'])
@@ -41,8 +39,7 @@ run_train_loop(model,
                train_data,
                epochs,
                steps_pr_epoch,
-               increase_beta_every_n_epochs=20,
-               cache_every_n=steps_pr_epoch+5,
+               increase_beta_at=[500, 800, 1000, 1200, 1400],
                testset=eval_data,
                eval_every_epoch=True,
                eval_steps=100,
@@ -50,3 +47,17 @@ run_train_loop(model,
                save_interpolation_image=True)
 
 
+arch_def['name'] = 'face_cvae_second_stage'
+init_model_dirs(model.arch_def['name'])
+model = CVAE(arch_def, loss='kl_mse', learning_rate=0.00001)
+model.encoding_trainable(False)
+run_train_loop(model,
+               train_data,
+               epochs,
+               steps_pr_epoch,
+               increase_beta_at=None,
+               testset=eval_data,
+               eval_every_epoch=True,
+               eval_steps=100,
+               save_test_images=2,
+               save_interpolation_image=True)
